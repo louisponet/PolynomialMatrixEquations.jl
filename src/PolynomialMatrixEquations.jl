@@ -9,6 +9,8 @@ export CyclicReductionWs, cyclic_reduction!, cyclic_reduction_check
 
 include("GeneralizedSchurDecompositionSolver.jl")
 export GsSolverWs, gs_solver!
+include("rendahl.jl")
+export RendahlWs, rendahl_solve!
 
 
 
