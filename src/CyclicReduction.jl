@@ -62,39 +62,32 @@ function cyclic_reduction!(x::MT,
     m  = ws.m
     m1 = ws.m1
     m2 = ws.m2
-    m1_a0 = view(m1, 1:n, 1:n)
-    m1_a2 = view(m1, 1:n, n+1:2n)
-    m2_a0 = view(m2, 1:n, 1:n)
-    m2_a2 = view(m2, n+1:2n, 1:n)
     ws.ahat1 .= a1
-    m1_a0 .= a0
-    m1_a2 .= a2
-    m2_a0 .= a0
-    m2_a2 .= a2
+    @views @inbounds begin
+        m1[1:n, 1:n] .= a0
+        m1[1:n, n+1:2n] .= a2
+        m2[1:n, 1:n] .= a0
+        m2[n+1:2n, 1:n] .= a2
+    end
     it = 0
-    m00 = view(m, 1:n, 1:n)
-    m02 = view(m, 1:n, n+1:2n)
-    m20 = view(m, n+1:2n, 1:n)
-    m22 = view(m, n+1:2n,n+1:2n)
-
-    nonzero_ranges = UnitRange[]
-    col_r = axes(m1, 2)
-    start = findfirst(i -> any(!iszero, view(m1, :, i)), col_r)
-    last  = findnext(j -> !any(!iszero, view(m1, :, j)), col_r, start)
+    # nonzero_ranges = UnitRange[]
+    # col_r = axes(m1, 2)
+    # start = findfirst(i -> any(!iszero, view(m1, :, i)), col_r)
+    # last  = findnext(j -> !any(!iszero, view(m1, :, j)), col_r, start)
     
-    while last !== nothing && start !== nothing
-        t = findnext(j -> !any(!iszero, view(m1, :, j)), col_r, start)
-        if t !== nothing
-            last = t - 1
-            push!(nonzero_ranges, start:last)
-            start = findnext(i -> any(!iszero, view(m1, :, i)), col_r, t)
-        else
-            break
-        end
-    end
-    if start !== nothing
-        push!(nonzero_ranges, start:col_r[end])
-    end
+    # while last !== nothing && start !== nothing
+    #     t = findnext(j -> !any(!iszero, view(m1, :, j)), col_r, start)
+    #     if t !== nothing
+    #         last = t - 1
+    #         push!(nonzero_ranges, start:last)
+    #         start = findnext(i -> any(!iszero, view(m1, :, i)), col_r, t)
+    #     else
+    #         break
+    #     end
+    # end
+    # if start !== nothing
+    #     push!(nonzero_ranges, start:col_r[end])
+    # end
         
     @inbounds while it < max_it
         #        ws.m = [a0; a2]*(a1\[a0 a2])
@@ -107,7 +100,7 @@ function cyclic_reduction!(x::MT,
         
         if issue 
             fill!(x, NaN)
-            if norm(m1_a0) < Inf
+            if norm(view(m1, 1:n, 1:n)) < Inf
                 throw(UndeterminateSystemException())
             else
                 throw(UnstableSystemException())
@@ -123,7 +116,7 @@ function cyclic_reduction!(x::MT,
     end
     if it == max_it
         println("max_it")
-        if norm(m1_a0) < cvg_tol
+        if norm(view(m1, 1:n, 1:n)) < cvg_tol
             throw(UnstableSystemException())
         else
             throw(UndeterminateSystemException())
@@ -175,28 +168,6 @@ function process_m!(m1::Matrix, m2::Matrix, a1::Matrix, ahat1::Matrix, m::Matrix
     return crit, crit2, issue
 end
 
-function inplace_mul!(m, A, B)
-    fill!(m, 0.0)
-    nB     = size(B, 2)
-    rowvalA = rowvals(A); nzvalA = nonzeros(A)
-    rowvalB = rowvals(B); nzvalB = nonzeros(B)
-    rowvalm = rowvals(m); nzvalm = nonzeros(m)
-    
-    @inbounds for j in 1:nB
-        mr = nzrange(m, j)
-        m_rows = view(rowvalm, mr)
-        for ib in nzrange(B, j) 
-            nzB = nzvalB[ib]
-            k = rowvalB[ib]
-            for ia in nzrange(A, k)
-                i = rowvalA[ia]
-                im = searchsortedfirst(m_rows, i)
-                nzvalm[im+first(mr)] += nzB * nzvalA[ia]
-            end
-        end
-    end
-end
-
 using SparseArrays
 
 function cyclic_reduction_sparse!(x::Matrix,
@@ -217,7 +188,7 @@ function cyclic_reduction_sparse!(x::Matrix,
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
         ldiv!(lu_t, m1)
         m1s = sparse(m1)
-        fill!(m1,0.0)
+        fill!(m1, 0.0)
         if it == 0
             m = m2 * m1s
             t = zeros(size(m2))
@@ -230,7 +201,7 @@ function cyclic_reduction_sparse!(x::Matrix,
         end
         if issue 
             fill!(x, NaN)
-            if norm(m1_a0) < Inf # TODO
+            if norm(view(m1,:, 1:size(a0, 2))) < Inf
                 throw(UndeterminateSystemException())
             else
                 throw(UnstableSystemException())
@@ -246,7 +217,7 @@ function cyclic_reduction_sparse!(x::Matrix,
     end
     if it == max_it
         println("max_it")
-        if norm(m1_a0) < cvg_tol
+        if norm(view(m1,:, 1:size(a0, 2))) < cvg_tol
             throw(UnstableSystemException())
         else
             throw(UndeterminateSystemException())
@@ -261,18 +232,17 @@ function cyclic_reduction_sparse!(x::Matrix,
     end
 end
 
-using LoopVectorization
 
 function process_m!(m1::Matrix, m2, a1::SparseMatrixCSC, ahat1::SparseMatrixCSC, m::SparseMatrixCSC, is, js, vs)
     n = size(m1, 1)
     crit = 0.0
     crit2 = 0.0
-    # issues = fill(false, Threads.nthreads())
+    issue = false
     @inbounds for id in 1:length(vs)
         j = is[id]
         i = js[id]
         v = -vs[id]
-        # issues[Threads.threadid()] = issues[Threads.threadid()] || isinf(v) || isnan(v)
+        issue = issue || isinf(v) || isnan(v)
         if j <= n
             if i <= n
                 m1[j, i] = v
