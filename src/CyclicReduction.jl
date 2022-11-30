@@ -169,121 +169,6 @@ function process_m!(m1::Matrix, m2::Matrix, a1::Matrix, ahat1::Matrix, m::Matrix
     return crit, crit2, issue
 end
 using LoopVectorization
-function cyclic_reduction_sparse1!(x,
-                           a0::MT,
-                           a1::MT,
-                           a2::MT,
-                           ws::CyclicReductionWs,
-                           cvg_tol::Float64,
-                           max_it::Int) where {MT}
-    n = size(a0,1)
-    x .= a0
-    m1_ = ws.m1
-    m2_ = ws.m2
-    ws.ahat1 .= a1
-
-
-    @views @inbounds begin
-        m1_[1:n, 1:n] .= a0
-        m1_[1:n, n+1:2n] .= a2
-        m2_[1:n, 1:n] .= a0
-        m2_[n+1:2n, 1:n] .= a2
-    end
-    zeroids = findall(j -> all(iszero, view(m1_,:,j)), 1:2n)
-    nonzeroids = setdiff(1:2n, zeroids)
-    n2 = length(nonzeroids)
-    m = view(ws.m, :, 1:n2)
-    m1 = view(ws.m1, :, 1:n2)
-    m2 = m2_
-    boundary = findfirst(x->x > n, nonzeroids) -1
-    @views @inbounds begin
-        m1[:, 1:boundary] .= a0[:, nonzeroids[1:boundary]]
-        m1[:, boundary+1:n2] .= a2[:, nonzeroids[boundary+1:end].-n]
-    end
-    it = 0
-    
-    @inbounds while it < max_it
-        #        ws.m = [a0; a2]*(a1\[a0 a2])
-        ws.a1copy .= a1
-        lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
-        ldiv!(lu_t, m1)
-        
-        m = mul!(m, m2, m1, -1.0, 0.0)
-        # crit, crit2, issue = process_m!(m1, m2, a1, ws.ahat1, m, zeroids, boundary)
-        crit = 0.0
-        crit2 = 0.0
-        for i in 1:boundary
-            nid = nonzeroids[i]
-            v = view(m, :, i)
-            m1v = view(m1, :, i)
-            m2v = view(m2, :, nid)
-            unsafe_copyto!(pointer(m1v), pointer(v), n)
-            unsafe_copyto!(pointer(m2v), pointer(v), n)
-            crit = sum(abs, v)
-        end
-        @turbo for i in boundary+1:n2
-            for j in 1:n
-                t = m[j+n, i]
-                m1[j, i] = t
-                crit2 += abs(t)
-            end
-        end
-        @turbo for i in boundary+1:n2
-            nid = nonzeroids[i]-n
-            for j in n+1:2n
-                t = m[j, i] 
-                m2[j, nid] = t
-                crit2 += abs(t)
-            end
-        end
-        @turbo for i in 1:boundary
-            nid = nonzeroids[i]
-            for j in n+1:2n
-                t = m[j, i]
-                tid = j-n
-                a1[tid, nid] += t
-                ws.ahat1[tid, nid] += t
-            end
-        end
-        @turbo for i in boundary+1:n2
-            nid = nonzeroids[i] - n
-            for j in 1:n
-                a1[j, nid] += m[j, i]
-            end
-        end
-                
-        if crit + crit2 == NaN 
-            fill!(x, NaN)
-            if norm(view(m1, 1:n, 1:n2)) < Inf
-                throw(UndeterminateSystemException())
-            else
-                throw(UnstableSystemException())
-            end
-        end
-        if crit < cvg_tol
-        # keep iterating until condition on a2 is met
-            if crit2 < cvg_tol
-                break
-            end
-        end
-        it += 1
-    end
-    if it == max_it
-        println("max_it")
-        if norm(view(m1, 1:n, 1:n2)) < cvg_tol
-            throw(UnstableSystemException())
-        else
-            throw(UndeterminateSystemException())
-        end
-        fill!(x,NaN)
-        return
-    else
-        lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
-        ldiv!(lu_t, x)
-        @inbounds lmul!(-1.0,x)
-        ws.info = 0
-    end
-end
 
 function cyclic_reduction_sparse1!(x,
                            a0::MT,
@@ -313,37 +198,41 @@ function cyclic_reduction_sparse1!(x,
     n_cols_m2 = length(nonzero_m2_ids)
     n_cols_m1 = length(nonzero_m1_ids)
     m = view(ws.m, :, 1:n_cols_m1)
-    m1 = zeros(n_cols_m2, n_cols_m1)
+    m1 = view(ws.m1, :, 1:n_cols_m1)
     m2 = view(ws.m2, :, 1:n_cols_m2)
     boundary_m1 = findfirst(x->x > n, nonzero_m1_ids) -1
-    a1_copy = zeros(n_cols_m2, n_cols_m2)
+   
     @views @inbounds begin
-        m1[:, 1:boundary_m1] .= a0[nonzero_m2_ids, nonzero_m1_ids[1:boundary_m1]]
-        m1[:, boundary_m1+1:n_cols_m1] .= a2[nonzero_m2_ids, nonzero_m1_ids[boundary_m1+1:end].-n]
-        m2[1:n, nonzero_m2_ids] .= a0[:, nonzero_m2_ids]
-        m2[n+1:2n, nonzero_m2_ids] .= a2[:, nonzero_m2_ids]
-        a1_copy .= a1[nonzero_m2_ids, nonzero_m2_ids]
+        m1[:, 1:boundary_m1] .= a0[:, nonzero_m1_ids[1:boundary_m1]]
+        m1[:, boundary_m1+1:n_cols_m1] .= a2[:, nonzero_m1_ids[boundary_m1+1:end].-n]
+    end
+
+    # Reorder equations
+    @inbounds for (i, id) in enumerate(nonzero_m2_ids)
+        for j in 1:n
+            a1[j, id], a1[j, i] = a1[j,i], a1[j,id]
+        end
+        @views m2[1:n, i] .= a0[:, id]
+        @views m2[n+1:2n, i] .= a2[:, id]
     end
     it = 0
     @inbounds while it < max_it
         #        ws.m = [a0; a2]*(a1\[a0 a2])
-        a1_copy .= a1[nonzero_m2_ids, nonzero_m2_ids]
-        lu_t = LU(factorize!(ws.linsolve_ws, a1_copy)...)
+        ws.a1copy .= a1
+        lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
         ldiv!(lu_t, m1)
-# There are rows of m1 that don't matter. can we do soemthing with this?
-        m1[7, :] .= rand()
-        m = mul!(m, m2, m1, -1.0, 0.0)
-        # crit, crit2, issue = process_m!(m1, m2, a1, ws.ahat1, m, zeroids, boundary_m1)
+        m = mul!(m, m2, view(m1, 1:n_cols_m2, :), -1.0, 0.0)
         crit = 0.0
         crit2 = 0.0
+        nid = 0
         for i in 1:boundary_m1
-            nid = nonzero_m1_ids[i]
+            nid = findnext(isequal(nonzero_m1_ids[i]), nonzero_m2_ids, nid+1)
             v = view(m, :, i)
             m1v = view(m1, :, i)
             m2v = view(m2, :, nid)
             unsafe_copyto!(pointer(m1v), pointer(v), n)
             unsafe_copyto!(pointer(m2v), pointer(v), n)
-            crit = sum(abs, v)
+            crit += sum(abs, v)
         end
         @turbo for i in boundary_m1+1:n_cols_m1
             for j in 1:n
@@ -352,26 +241,30 @@ function cyclic_reduction_sparse1!(x,
                 crit2 += abs(t)
             end
         end
-        @turbo for i in boundary_m1+1:n_cols_m1
-            nid = nonzero_m1_ids[i]-n
-            for j in n+1:2n
+        nid = 0
+        for i in boundary_m1+1:n_cols_m1
+            nid = findnext(isequal(nonzero_m1_ids[i]-n), nonzero_m2_ids, nid+1)
+            @turbo for j in n+1:2n
                 t = m[j, i] 
                 m2[j, nid] = t
                 crit2 += abs(t)
             end
         end
-        @turbo for i in 1:boundary_m1
-            nid = nonzero_m1_ids[i]
-            for j in n+1:2n
+        nid = 0
+        for i in 1:boundary_m1
+            nid2 = nonzero_m1_ids[i]
+            nid = findnext(isequal(nid2), nonzero_m2_ids, nid+1)
+            @turbo for j in n+1:2n
                 t = m[j, i]
                 tid = j-n
                 a1[tid, nid] += t
-                ws.ahat1[tid, nid] += t
+                ws.ahat1[tid, nid2] += t
             end
         end
-        @turbo for i in boundary_m1+1:n_cols_m1
-            nid = nonzero_m1_ids[i] - n
-            for j in 1:n
+        nid = 0
+        for i in boundary_m1+1:n_cols_m1
+            nid = findnext(isequal(nonzero_m1_ids[i] - n), nonzero_m2_ids, nid+1)
+            @turbo for j in 1:n
                 a1[j, nid] += m[j, i]
             end
         end
@@ -408,6 +301,152 @@ function cyclic_reduction_sparse1!(x,
         ws.info = 0
     end
 end
+
+function cyclic_reduction_sparse2!(x,
+                           a0::MT,
+                           a1::MT,
+                           a2::MT,
+                           ws::CyclicReductionWs,
+                           cvg_tol::Float64,
+                           max_it::Int) where {MT}
+    n = size(a0,1)
+    x .= a0
+    m1_ = ws.m1
+    m2_ = ws.m2
+    ws.ahat1 .= a1
+
+
+    @views @inbounds begin
+        m1_[1:n, 1:n] .= a0
+        m1_[1:n, n+1:2n] .= a2
+        m2_[1:n, 1:n] .= a0
+        m2_[n+1:2n, 1:n] .= a2
+    end
+    m1_nonzero_cols = findall(j -> any(!iszero, view(m1_,:,j)), 1:2n)
+     
+    m2_nonzero_cols = findall(j -> any(!iszero, view(m2_,:,j)), 1:n)
+    n_cols_m2 = length(m2_nonzero_cols)
+    n_cols_m1 = length(m1_nonzero_cols)
+    m1 = view(ws.m1, :, 1:n_cols_m1)
+    col_boundary_m1 = findfirst(x->x > n, m1_nonzero_cols) -1
+
+    
+    m2_nonzero_rows = findall(j -> any(!iszero, view(m2_,j,:)), 1:2n)
+    row_boundary_m2 = findfirst(x->x > n, m2_nonzero_rows) - 1
+    m2_n_rows = length(m2_nonzero_rows)
+    m2 = zeros(m2_n_rows, n_cols_m2)
+    
+    @views @inbounds begin
+        m1[:, 1:col_boundary_m1] .= a0[:, m1_nonzero_cols[1:col_boundary_m1]]
+        m1[:, col_boundary_m1+1:n_cols_m1] .= a2[:, m1_nonzero_cols[col_boundary_m1+1:end].-n]
+    end
+    
+    m = zeros(m2_n_rows, n_cols_m1)
+    # Reorder equations
+    
+    @inbounds for (i, id) in enumerate(m2_nonzero_cols)
+        for j in 1:n
+            a1[j, id], a1[j, i] = a1[j,i], a1[j,id]
+        end
+        for (j, jid) in enumerate(m2_nonzero_rows)
+            m2[j, i] = a0[jid, id]
+            m2[j+row_boundary_m2, i] = a2[jid, id]
+        end
+    end
+    
+    it = 0
+    while it < max_it
+        #        ws.m = [a0; a2]*(a1\[a0 a2])
+        ws.a1copy .= a1
+        lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
+        ldiv!(lu_t, m1)
+        m = mul!(m, m2, view(m1, 1:n_cols_m2, :), -1.0, 0.0)
+        @show sum(m[:,1])
+        crit = 0.0
+        crit2 = 0.0
+        nid = 0
+        for i in 1:col_boundary_m1
+            @show i
+            nid = findnext(isequal(m1_nonzero_cols[i]), m2_nonzero_cols, nid+1)
+            v = view(m, :, i)
+            m1v = view(m1, :, i)
+            m2v = view(m2, :, nid)
+            m2v .= v
+            for ij in 1:row_boundary_m2
+                m1v[m2_nonzero_rows[ij]] = v[ij]
+            end
+            crit += sum(abs, v)
+        end
+        @show "ping"
+        for i in col_boundary_m1+1:n_cols_m1
+            @show i
+            for j in 1:row_boundary_m2
+                t = m[j+row_boundary_m2, i]
+                m1[m2_nonzero_rows[j], i] = t
+                crit2 += abs(t)
+            end
+        end
+        nid = 0
+        for i in col_boundary_m1+1:n_cols_m1
+            nid = findnext(isequal(m1_nonzero_cols[i]-n), m2_nonzero_cols, nid+1)
+            for j in row_boundary_m2+1:m2_n_rows
+                t = m[j, i] 
+                m2[j, nid] = t
+                crit2 += abs(t)
+            end
+        end
+        nid = 0
+        for i in 1:col_boundary_m1
+            nid2 = m1_nonzero_cols[i]
+            nid = findnext(isequal(nid2), m2_nonzero_cols, nid+1)
+            for j in row_boundary_m2+1:m2_n_rows
+                t = m[j, i]
+                tid = m2_nonzero_rows[j]-n
+                a1[tid, nid] += t
+                ws.ahat1[tid, nid2] += t
+            end
+        end
+        nid = 0
+        for i in col_boundary_m1+1:n_cols_m1
+            nid = findnext(isequal(m1_nonzero_cols[i] - n), m2_nonzero_cols, nid+1)
+            for j in 1:row_boundary_m2
+                a1[m2_nonzero_rows[j], nid] += m[j, i]
+            end
+        end
+                
+        if crit + crit2 == NaN 
+            fill!(x, NaN)
+            if norm(view(m1, 1:n, 1:n_cols_m1)) < Inf
+                throw(UndeterminateSystemException())
+            else
+                throw(UnstableSystemException())
+            end
+        end
+        if crit < cvg_tol
+        # keep iterating until condition on a2 is met
+            if crit2 < cvg_tol
+                break
+            end
+        end
+        it += 1
+    end
+    if it == max_it
+        println("max_it")
+        if norm(view(m1, 1:n, 1:n_cols_m1)) < cvg_tol
+            throw(UnstableSystemException())
+        else
+            throw(UndeterminateSystemException())
+        end
+        fill!(x,NaN)
+        return
+    else
+        lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
+        ldiv!(lu_t, x)
+        @inbounds lmul!(-1.0,x)
+        ws.info = 0
+    end
+end
+
 
 
 using SparseArrays
