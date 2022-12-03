@@ -1,35 +1,39 @@
 using LinearAlgebra
 using LinearAlgebra.BLAS: gemm!
-export CyclicReductionWs, cyclic_reduction!, cyclic_reduction_check
+export CyclicReductionWs, cyclic_reduction!, cyclic_reduction, cyclic_reduction_check
 using SparseArrays
 using LoopVectorization
 
-mutable struct CyclicReductionWs{MT,WS}
+mutable struct CyclicReductionWs{T, WS}
     linsolve_ws::WS
-    ahat1::MT
-    a1copy::MT
-    m::MT
-    m1::MT
-    m2::MT
-    info::Int
+    ahat1::Matrix{T}
+    a1copy::Matrix{T}
+    m::Matrix{T}
+    m1::Matrix{T}
+    m2::Matrix{T}
 end
-function CyclicReductionWs(n::Int)
+function CyclicReductionWs(::Type{T}, n::Int) where {T<:AbstractFloat}
     linsolve_ws = LUWs(n)
-    ahat1 = Matrix{Float64}(undef, n,n)
-    a1copy = Matrix{Float64}(undef, n,n)
-    m = Matrix{Float64}(undef, 2*n,2*n)
-    m1 = Matrix{Float64}(undef, n, 2*n)
-    m2 = Matrix{Float64}(undef, 2*n, n)
-    CyclicReductionWs(linsolve_ws, ahat1, a1copy, m, m1, m2,0) 
+    ahat1 = Matrix{T}(undef, n,n)
+    a1copy = Matrix{T}(undef, n,n)
+    m = Matrix{T}(undef, 2*n,2*n)
+    m1 = Matrix{T}(undef, n, 2*n)
+    m2 = Matrix{T}(undef, 2*n, n)
+    CyclicReductionWs(linsolve_ws, ahat1, a1copy, m, m1, m2) 
 end
+CyclicReductionWs(n::Int) = CyclicReductionWs(Float64, n)
 
 """
-    cyclic_reduction!(x::Array{Float64},a0::Array{Float64},a1::Array{Float64},a2::Array{Float64},ws::CyclicReductionWs, cvg_tol::Float64, max_it::Int64)
+    cyclic_reduction!(x::AbstractMatrix, a0::AbstractMatrix, a1::AbstractMatrix, a2::AbstractMatrix[, ws::CyclicReductionWs];
+                      tolerance=1e-8, max_it=100)
 
-Solve the quadratic matrix equation a0 + a1*x + a2*x*x = 0, using the cyclic reduction method from Bini et al. (???).
+Solves the quadratic matrix equation `a0 + a1*x + a2*x*x = 0`, using the cyclic reduction method from Bini et al. (???).
+If `a0` and `a2` are `SparseMatrixCSC`, a variation will be used that optimally packs the equations. `a1` will always be used (i.e. potentially converted) as standard `Matrix`.
 
-The solution is returned in matrix x. In case of nonconvergency, x is set to NaN and 
-UndeterminateSystemExcpetion or UnstableSystemException is thrown
+The solution is returned in `x`. In case of nonconvergency, `x` is set to `NaN` and 
+`UndeterminateSystemExcpetion` or `UnstableSystemException` is thrown.
+
+During the solving, `x`, `a1` and `ws` are subject to changes.
 
 # Example
 ```meta
@@ -49,14 +53,12 @@ julia> display(names(CyclicReduction))
 ```
 
 ```jldoctest
-julia> cyclic_reduction!(x,a0,a1,a2,ws,1e-8,50)
+julia> cyclic_reduction!(x, a0, a1, a2, ws, tolerance = 1e-8, max_it = 50)
 ```
 """
-function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT,
-                           ws::CyclicReductionWs{MT},
-                           cvg_tol::Float64,
-                           max_it::Int) where {MT<:Matrix}
-    n = size(a0,1)
+function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT, ws::CyclicReductionWs{T};
+                           tolerance::Number = 1e-8, max_it::Int=100) where {T<:AbstractFloat, MT<:Matrix{T}}
+    n = size(a0, 1)
     x .= a0
     m  = ws.m
     m1 = ws.m1
@@ -97,50 +99,25 @@ function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT,
                 a1[j, i] += t5
             end
         end
-        
-        if crit + crit2 == NaN 
-            fill!(x, NaN)
-            if norm(view(m1, 1:n, 1:n)) < Inf
-                throw(UndeterminateSystemException())
-            else
-                throw(UnstableSystemException())
-            end
-        end
-        # keep iterating until condition on a2 is met
-        if crit < cvg_tol
-            if crit2 < cvg_tol
-                break
-            end
-        end
+        check_convergence!(x, it, crit, crit2, view(m1, 1:n, 1:n), tolerance, max_it) && break
         it += 1
     end
-    if it == max_it
-        println("max_it")
-        if norm(view(m1, 1:n, 1:n)) < cvg_tol
-            throw(UnstableSystemException())
-        else
-            throw(UndeterminateSystemException())
-        end
-        fill!(x,NaN)
-        return
-    else
-        lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
-        ldiv!(lu_t, x)
-        @inbounds lmul!(-1.0, x)
-        ws.info = 0
-    end
+    lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
+    ldiv!(lu_t, x)
+    @inbounds lmul!(-1.0, x)
+    return x
 end
 
-function cyclic_reduction_check(x::Array{Float64,2},a0::Array{Float64,2}, a1::Array{Float64,2}, a2::Array{Float64,2},cvg_tol::Float64)
+function cyclic_reduction_check(x::Array{Float64,2},a0::Array{Float64,2}, a1::Array{Float64,2}, a2::Array{Float64,2},tolerance::Float64)
     res = a0 + a1*x + a2*x*x
-    if (sum(sum(abs.(res))) > cvg_tol)
-        print("the norm of the residuals, ", res, ", compared to the tolerance criterion ",cvg_tol)
+    if (sum(sum(abs.(res))) > tolerance)
+        print("the norm of the residuals, ", res, ", compared to the tolerance criterion ",tolerance)
     end
     nothing
 end
 
-function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_, a2::SparseMatrixCSC,
-                           ws::CyclicReductionWs, cvg_tol, max_it::Int)
+function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC, ws::CyclicReductionWs;
+                           tolerance::Number = 1e-8, max_it::Int=100)
     n = size(a0,1)
 
     # Copy a0 for the final ldiv!
@@ -273,7 +250,7 @@ function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_, a2::SparseMatrixCSC,
     m22_zero_rows = filter(x -> x > n, m2_zero_rows) .- n 
 
     it = 0
-    @inbounds while it < max_it
+    @inbounds while it <= max_it
         # Solve m = [a0; a2]*(a1\[a0 a2])
         ws.a1copy .= a1
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
@@ -336,38 +313,52 @@ function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_, a2::SparseMatrixCSC,
             end
             m1[m22_zero_rows, i] .= 0.0
         end
-
-        # Check whether something went wrong
-        if crit + crit2 == NaN 
-            fill!(x, NaN)
-            if norm(m1) < Inf
-                throw(UndeterminateSystemException())
-            else
-                throw(UnstableSystemException())
-            end
-        end
-        
-        # Check whether convergence criterion is met
-        if crit < cvg_tol
-            if crit2 < cvg_tol
-                break
-            end
-        end
+        check_convergence!(x, it, crit, crit2, m1, tolerance, max_it) && break
         it += 1
+    end
+    
+    lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
+    ldiv!(lu_t, x)
+    @inbounds lmul!(-1.0, x)
+    return x
+end
+
+cyclic_reduction!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
+    cyclic_reduction!(x, a0, a1, a2, CyclicReductionWs(T, size(a1, 1)); kwargs...)
+"""
+    cyclic_reduction(a0, a1, a2)
+
+Non mutating version of [`cyclic_reduction!`](@ref).
+"""
+cyclic_reduction(a0, a1, a2; kwargs...) =
+    cyclic_reduction!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
+
+function check_convergence!(x, it, crit1, crit2, m1, tolerance, max_it)
+    if crit1 + crit2 == NaN 
+        fill!(x, NaN)
+        if norm(m1) < Inf
+            throw(UndeterminateSystemException())
+        else
+            throw(UnstableSystemException())
+        end
+    end
+    
+    # Check whether convergence criterion is met
+    if crit1 < tolerance
+        if crit2 < tolerance
+            return true
+        end
     end
     if it == max_it
         @error "Max iterations reached without converging"
-        if norm(m1) < cvg_tol
+        fill!(x, NaN)
+        if norm(m1) < tolerance
             throw(UnstableSystemException())
         else
             throw(UndeterminateSystemException())
         end
-        fill!(x, NaN)
-        return x
-    else
-        lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
-        ldiv!(lu_t, x)
-        @inbounds lmul!(-1.0, x)
-        return x
+        return true
     end
+    return false
 end
+    
