@@ -20,8 +20,13 @@ end
 CyclicReductionWs(n::Int) = CyclicReductionWs(Float64, n)
 
 """
-    solve!([ws::CyclicReductionWs, ], x::AbstractMatrix, a0::AbstractMatrix, a1::AbstractMatrix, a2::AbstractMatrix;
-           tolerance=1e-8, iterations=100)
+    solve!([ws::CyclicReductionWs, ],
+           x::AbstractMatrix,
+           a0::AbstractMatrix,
+           a1::AbstractMatrix,
+           a2::AbstractMatrix;
+           tolerance=1e-8,
+           iterations=100)
 
 Solves the quadratic matrix equation `a0 + a1*x + a2*x*x = 0`, using the cyclic reduction method from Bini et al. (???).
 If `a0` and `a2` are `SparseMatrixCSC`, a variation will be used that optimally packs the equations. `a1` will always be used (i.e. potentially converted) as standard `Matrix`.
@@ -29,27 +34,32 @@ If `a0` and `a2` are `SparseMatrixCSC`, a variation will be used that optimally 
 The solution is returned in `x`. In case of nonconvergency, `x` is set to `NaN` and 
 `UndeterminateSystemExcpetion` or `UnstableSystemException` is thrown.
 
-During the solving, `x`, `a1` and `ws` are subject to changes.
+During the solving, `x`, `a1` and `ws` are mutated.
+Use `solve(a0, a1, a2)` for a non-mutating version.
 
 # Example
-```meta
-DocTestSetup = quote
-     using CyclicReduction
-     n = 3
-     ws = CyclicReductionWs(n)
-     a0 = [0.5 0 0; 0 0.5 0; 0 0 0];
-     a1 = eye(n)
-     a2 = [0 0 0; 0 0 0; 0 0 0.8]
-     x = zeros(n,n)
-end
-```
-
 ```jldoctest
-julia> display(names(CyclicReduction))
-```
+julia> using PolynomialMatrixEquations
 
-```jldoctest
-julia> solve!(ws, x, a0, a1, a2, tolerance = 1e-8, iterations = 50)
+julia> using LinearAlgebra
+
+julia> n = 3;
+
+julia> ws = CyclicReductionWs(n);
+
+julia> a0 = [0.5 0 0; 0 0.5 0; 0 0 0];
+
+julia> a1 = Matrix(1.0I, n, n);
+
+julia> a2 = [0 0 0; 0 0 0; 0 0 0.8];
+
+julia> x = zeros(n,n);
+
+julia> PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2, tolerance = 1e-8, iterations = 50)
+3×3 Matrix{Float64}:
+ -0.5  -0.0  -0.0
+ -0.0  -0.5  -0.0
+ -0.0  -0.0  -0.0
 ```
 """
 function solve!(ws::CyclicReductionWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
@@ -314,11 +324,6 @@ end
 solve!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
     solve!(CyclicReductionWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
     
-"""
-    solve(a0, a1, a2)
-
-Non mutating version of [`solve!`](@ref).
-"""
 solve(a0, a1, a2; kwargs...) =
     solve!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
 

@@ -24,14 +24,13 @@ function GSSolverWs(d::AbstractMatrix, n1::Int)
 end
 
 """
-   solve!([ws::GSSolverWs,] d::Matrix,e::Matrix,n1::Int64, qz_criterium)
-
+    solve!([ws::GSSolverWs,] d::Matrix, e::Matrix, n1::Int64, qz_criterium)
 
 The solution is returned in `ws.x1` and `ws.x2`.
 `d` and `e` are mutated during the solving.
 `n1` determines how many stable solutions should be found.
 """
-function solve!(ws::GSSolverWs{T}, d::Matrix{T}, e::Matrix{T}, n1::Int64, qz_criterium::Float64 = 1 + 1e-6) where {T<:AbstractFloat}
+function solve!(ws::GSSolverWs{T}, d::Matrix{T}, e::Matrix{T}, n1::Int64, qz_criterium::Number = 1 + 1e-6) where {T<:AbstractFloat}
     gges!(ws.schurws, 'N', 'V', e, d; select = (αr, αi, β) -> αr^2 + αi^2 < qz_criterium * β^2)
     nstable = ws.schurws.sdim[]::Int
     n = size(d, 1)

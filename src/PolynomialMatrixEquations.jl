@@ -9,10 +9,10 @@ using SparseArrays
 using LoopVectorization
 
 
-include("CyclicReduction.jl")
+include("cyclic_reduction.jl")
 export CyclicReductionWs
 
-include("GeneralizedSchurDecompositionSolver.jl")
+include("gs_solver.jl")
 export GSSolverWs
 
 end # module
