@@ -2,14 +2,17 @@ module PolynomialMatrixEquations
 
 struct UnstableSystemException <: Exception end
 struct UndeterminateSystemException <: Exception end
-export UnstableSystemException, UndeterminateSystemException
+    
 using FastLapackInterface
+using LinearAlgebra
+using SparseArrays
+using LoopVectorization
+
+
 include("CyclicReduction.jl")
-export CyclicReductionWs, cyclic_reduction!, cyclic_reduction_check
+export CyclicReductionWs
 
 include("GeneralizedSchurDecompositionSolver.jl")
-export GsSolverWs, gs_solver!
-
-
+export GSSolverWs
 
 end # module

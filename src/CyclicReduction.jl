@@ -1,8 +1,4 @@
-using LinearAlgebra
 using LinearAlgebra.BLAS: gemm!
-export CyclicReductionWs, cyclic_reduction!, cyclic_reduction, cyclic_reduction_check
-using SparseArrays
-using LoopVectorization
 
 mutable struct CyclicReductionWs{T, WS}
     linsolve_ws::WS
@@ -24,8 +20,8 @@ end
 CyclicReductionWs(n::Int) = CyclicReductionWs(Float64, n)
 
 """
-    cyclic_reduction!(x::AbstractMatrix, a0::AbstractMatrix, a1::AbstractMatrix, a2::AbstractMatrix[, ws::CyclicReductionWs];
-                      tolerance=1e-8, max_it=100)
+    solve!([ws::CyclicReductionWs, ], x::AbstractMatrix, a0::AbstractMatrix, a1::AbstractMatrix, a2::AbstractMatrix;
+           tolerance=1e-8, iterations=100)
 
 Solves the quadratic matrix equation `a0 + a1*x + a2*x*x = 0`, using the cyclic reduction method from Bini et al. (???).
 If `a0` and `a2` are `SparseMatrixCSC`, a variation will be used that optimally packs the equations. `a1` will always be used (i.e. potentially converted) as standard `Matrix`.
@@ -53,11 +49,11 @@ julia> display(names(CyclicReduction))
 ```
 
 ```jldoctest
-julia> cyclic_reduction!(x, a0, a1, a2, ws, tolerance = 1e-8, max_it = 50)
+julia> solve!(ws, x, a0, a1, a2, tolerance = 1e-8, iterations = 50)
 ```
 """
-function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT, ws::CyclicReductionWs{T};
-                           tolerance::Number = 1e-8, max_it::Int=100) where {T<:AbstractFloat, MT<:Matrix{T}}
+function solve!(ws::CyclicReductionWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
+                tolerance::Number = 1e-8, iterations::Int=100) where {T<:AbstractFloat}
     n = size(a0, 1)
     x .= a0
     m  = ws.m
@@ -73,7 +69,7 @@ function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT, ws::CyclicReductionWs{
     end
     it = 0
     
-    @inbounds while it < max_it
+    @inbounds while it < iterations
         # ws.m = [a0; a2]*(a1\[a0 a2])
         ws.a1copy .= a1
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
@@ -99,7 +95,7 @@ function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT, ws::CyclicReductionWs{
                 a1[j, i] += t5
             end
         end
-        check_convergence!(x, it, crit, crit2, view(m1, 1:n, 1:n), tolerance, max_it) && break
+        check_convergence!(x, it, crit, crit2, view(m1, 1:n, 1:n), tolerance, iterations) && break
         it += 1
     end
     lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
@@ -108,16 +104,8 @@ function cyclic_reduction!(x::MT, a0::MT, a1::MT, a2::MT, ws::CyclicReductionWs{
     return x
 end
 
-function cyclic_reduction_check(x::Array{Float64,2},a0::Array{Float64,2}, a1::Array{Float64,2}, a2::Array{Float64,2},tolerance::Float64)
-    res = a0 + a1*x + a2*x*x
-    if (sum(sum(abs.(res))) > tolerance)
-        print("the norm of the residuals, ", res, ", compared to the tolerance criterion ",tolerance)
-    end
-    nothing
-end
-
-function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC, ws::CyclicReductionWs;
-                           tolerance::Number = 1e-8, max_it::Int=100)
+function solve!(ws::CyclicReductionWs, x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
+                           tolerance::Number = 1e-8, iterations::Int=100)
     n = size(a0,1)
 
     # Copy a0 for the final ldiv!
@@ -250,7 +238,7 @@ function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Spar
     m22_zero_rows = filter(x -> x > n, m2_zero_rows) .- n 
 
     it = 0
-    @inbounds while it <= max_it
+    @inbounds while it <= iterations
         # Solve m = [a0; a2]*(a1\[a0 a2])
         ws.a1copy .= a1
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
@@ -313,7 +301,7 @@ function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Spar
             end
             m1[m22_zero_rows, i] .= 0.0
         end
-        check_convergence!(x, it, crit, crit2, m1, tolerance, max_it) && break
+        check_convergence!(x, it, crit, crit2, m1, tolerance, iterations) && break
         it += 1
     end
     
@@ -323,20 +311,21 @@ function cyclic_reduction!(x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Spar
     return x
 end
 
-cyclic_reduction!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
-    cyclic_reduction!(x, a0, a1, a2, CyclicReductionWs(T, size(a1, 1)); kwargs...)
+solve!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
+    solve!(CyclicReductionWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
+    
 """
-    cyclic_reduction(a0, a1, a2)
+    solve(a0, a1, a2)
 
-Non mutating version of [`cyclic_reduction!`](@ref).
+Non mutating version of [`solve!`](@ref).
 """
-cyclic_reduction(a0, a1, a2; kwargs...) =
-    cyclic_reduction!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
+solve(a0, a1, a2; kwargs...) =
+    solve!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
 
-function check_convergence!(x, it, crit1, crit2, m1, tolerance, max_it)
-    if crit1 + crit2 == NaN 
+function check_convergence!(x, it, crit1, crit2, m1, tolerance, iterations)
+    if isnan(crit1 + crit2) 
         fill!(x, NaN)
-        if norm(m1) < Inf
+        if m1[1] < Inf
             throw(UndeterminateSystemException())
         else
             throw(UnstableSystemException())
@@ -349,7 +338,7 @@ function check_convergence!(x, it, crit1, crit2, m1, tolerance, max_it)
             return true
         end
     end
-    if it == max_it
+    if it == iterations
         @error "Max iterations reached without converging"
         fill!(x, NaN)
         if norm(m1) < tolerance
