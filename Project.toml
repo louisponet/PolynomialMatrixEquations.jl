@@ -1,6 +1,6 @@
 name = "PolynomialMatrixEquations"
 uuid = "4f9d485d-518f-41ed-81c8-372cd804c93b"
-authors = ["Michel Juillard <michel.juillard@mjui.fr> "]
+authors = ["Michel Juillard <michel.juillard@mjui.fr>, Louis Ponet <louisponet@gmail.com>"]
 version = "0.2.0"
 
 [deps]
@@ -11,4 +11,5 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
 FastLapackInterface = "^1"
-julia = "1.6.5"
+LoopVectorization = "0.12.126"
+julia = "^1.6"
