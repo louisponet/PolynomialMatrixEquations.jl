@@ -12,6 +12,7 @@ In the sparse version, a special packing is performed that maximally exploits th
 of the $A$ matrices.
 
 ```@docs
+CyclicReductionWs
 PolynomialMatrixEquations.solve!(::CyclicReductionWs{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}) where {T<:AbstractFloat}
 ```
 
@@ -29,5 +30,6 @@ I \\ X_2
  where matrices $X_1$ and $X_2$ contain columns from the solution matrix $X$.
 
  ```@docs
+GSSolverWs
 PolynomialMatrixEquations.solve!(::GSSolverWs{T}, ::Matrix{T}, ::Matrix{T}, ::Int, ::Number) where {T<:AbstractFloat}
 ```

@@ -1,5 +1,12 @@
 using LinearAlgebra.LAPACK: gges!
 
+"""
+    GSSolverWs
+
+Workspace for solving with the GeneralizedSchur solver.
+Can be constructed using a matrix and the number of stable solutions, i.e.
+`GSSolverWs(A, n)` with `A` an example `Matrix` and `n` the number of solutions. 
+""" 
 struct GSSolverWs{T<:AbstractFloat}
     tmp1::Matrix{T}
     tmp2::Matrix{T}

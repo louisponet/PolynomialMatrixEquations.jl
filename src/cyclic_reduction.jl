@@ -1,5 +1,12 @@
 using LinearAlgebra.BLAS: gemm!
 
+"""
+    CyclicReductionWs
+
+Workspace used for solving with the cyclic reduction algorithm.
+Can be constructed as `CyclicReductionWs(n)` with `n` the leading dimension of
+the matrics \$A_0\$, \$A_1\$ and \$A_2\$, i.e. the number of equations.
+"""
 mutable struct CyclicReductionWs{T, WS}
     linsolve_ws::WS
     ahat1::Matrix{T}
