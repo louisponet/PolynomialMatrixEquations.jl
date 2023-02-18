@@ -10,7 +10,7 @@ using LoopVectorization
 
 
 include("cyclic_reduction.jl")
-export CyclicReductionWs
+export CRSolverWs
 
 include("gs_solver.jl")
 export GSSolverWs

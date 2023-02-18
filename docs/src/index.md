@@ -12,8 +12,8 @@ In the sparse version, a special packing is performed that maximally exploits th
 of the $A$ matrices.
 
 ```@docs
-CyclicReductionWs
-PolynomialMatrixEquations.solve!(::CyclicReductionWs{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}) where {T<:AbstractFloat}
+CRSolverWs
+PolynomialMatrixEquations.solve!(::CRSolverWs{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}, ::Matrix{T}) where {T<:AbstractFloat}
 ```
 
 # Generalized Schur Decomposition Solver

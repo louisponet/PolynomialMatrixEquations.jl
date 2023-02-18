@@ -19,7 +19,7 @@ Two algorithms are provided
 
 ## Cyclic reduction
 
-    cyclic_reduction!(x::Array{Float64},a0::Array{Float64},a1::Array{Float64},a2::Array{Float64},ws::CyclicReductionWs, cvg_tol::Float64, max_it::Int64)
+    solve!(ws::CRSolverWs, x::Array{Float64},a0::Array{Float64},a1::Array{Float64},a2::Array{Float64}, cvg_tol::Float64, max_it::Int64)
 
 Solve the quadratic matrix equation a0 + a1*x + a2*x*x = 0, using the cyclic reduction method from Bini et al. (???).
 
@@ -28,16 +28,16 @@ The solution is returned in matrix x. In case of nonconvergency, x is set to NaN
 
 # Example
 ```
-using CyclicReduction
+using PolynomialMatrixEquations
 n = 3
-ws = CyclicReductionWs(n)
+ws = CRSolverWs(n)
 a0 = [0.5 0 0; 0 0.5 0; 0 0 0];
 a1 = eye(n)
 a2 = [0 0 0; 0 0 0; 0 0 0.8]
 x = zeros(n,n)
 
 
-cyclic_reduction!(x,a0,a1,a2,ws,1e-8,50)
+solve!(ws,x,a0,a1,a2,tolerance=1e-8,maxiter=50)
 
 
 
@@ -45,7 +45,7 @@ cyclic_reduction!(x,a0,a1,a2,ws,1e-8,50)
 
 ```
 
-    gs_solver!(ws::GsSolverWs,d::Matrix{Float64},e::Matrix{Float64},n1::Int64,qz_criterium)
+    solve!(ws::GSSolverWs,d::Matrix{Float64},e::Matrix{Float64},n1::Int64,qz_criterium)
 
 ```
 

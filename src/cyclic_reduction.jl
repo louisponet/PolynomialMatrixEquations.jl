@@ -1,13 +1,13 @@
 using LinearAlgebra.BLAS: gemm!
 
 """
-    CyclicReductionWs
+    CRSolverWs
 
 Workspace used for solving with the cyclic reduction algorithm.
-Can be constructed as `CyclicReductionWs(n)` with `n` the leading dimension of
+Can be constructed as `CRSolverWs(n)` with `n` the leading dimension of
 the matrics \$A_0\$, \$A_1\$ and \$A_2\$, i.e. the number of equations.
 """
-mutable struct CyclicReductionWs{T, WS}
+mutable struct CRSolverWs{T, WS}
     linsolve_ws::WS
     ahat1::Matrix{T}
     a1copy::Matrix{T}
@@ -15,19 +15,19 @@ mutable struct CyclicReductionWs{T, WS}
     m1::Matrix{T}
     m2::Matrix{T}
 end
-function CyclicReductionWs(::Type{T}, n::Int) where {T<:AbstractFloat}
+function CRSolverWs(::Type{T}, n::Int) where {T<:AbstractFloat}
     linsolve_ws = LUWs(n)
     ahat1 = Matrix{T}(undef, n,n)
     a1copy = Matrix{T}(undef, n,n)
     m = Matrix{T}(undef, 2*n,2*n)
     m1 = Matrix{T}(undef, n, 2*n)
     m2 = Matrix{T}(undef, 2*n, n)
-    CyclicReductionWs(linsolve_ws, ahat1, a1copy, m, m1, m2) 
+    CRSolverWs(linsolve_ws, ahat1, a1copy, m, m1, m2) 
 end
-CyclicReductionWs(n::Int) = CyclicReductionWs(Float64, n)
+CRSolverWs(n::Int) = CRSolverWs(Float64, n)
 
 """
-    solve!([ws::CyclicReductionWs, ],
+    solve!([ws::CRSolverWs, ],
            x::AbstractMatrix,
            a0::AbstractMatrix,
            a1::AbstractMatrix,
@@ -52,7 +52,7 @@ julia> using LinearAlgebra
 
 julia> n = 3;
 
-julia> ws = CyclicReductionWs(n);
+julia> ws = CRSolverWs(n);
 
 julia> a0 = [0.5 0 0; 0 0.5 0; 0 0 0];
 
@@ -69,7 +69,7 @@ julia> PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2, tolerance = 1e-8, ite
  -0.0  -0.0  -0.0
 ```
 """
-function solve!(ws::CyclicReductionWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
+function solve!(ws::CRSolverWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
                 tolerance::Number = 1e-8, iterations::Int=100) where {T<:AbstractFloat}
     n = size(a0, 1)
     x .= a0
@@ -121,21 +121,22 @@ function solve!(ws::CyclicReductionWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matri
     return x
 end
 
-function solve!(ws::CyclicReductionWs, x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
+function solve!(ws::CRSolverWs, x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
                            tolerance::Number = 1e-8, iterations::Int=100)
     n = size(a0,1)
+    l1 = length(a1_)
 
     # Copy a0 for the final ldiv!
     x .= a0
     
-    fill!(ws.m1, 0.0)
-    fill!(ws.m2, 0.0)
+    # fill!(ws.m1, 0.0)
+    # fill!(ws.m2, 0.0)
     m1_ = ws.m1
     m2_ = ws.m2
-    ws.ahat1 .= a1_
+    a1 = Matrix(a1_)
+    unsafe_copyto!(ws.ahat1, 1, a1, 1, l1)
 
     # Always better to use a regular matrix for a1
-    a1 = Matrix(a1_)
 
     # fill m1 = [a0 a2]
     @inbounds begin
@@ -257,7 +258,7 @@ function solve!(ws::CyclicReductionWs, x, a0::SparseMatrixCSC, a1_::AbstractMatr
     it = 0
     @inbounds while it <= iterations
         # Solve m = [a0; a2]*(a1\[a0 a2])
-        ws.a1copy .= a1
+        unsafe_copyto!(ws.a1copy, 1, a1, 1, l1)
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
         ldiv!(lu_t, m1)
         m = mul!(m, m2, view(m1, 1:m2_n_cols, :), -1.0, 0.0)
@@ -329,7 +330,7 @@ function solve!(ws::CyclicReductionWs, x, a0::SparseMatrixCSC, a1_::AbstractMatr
 end
 
 solve!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
-    solve!(CyclicReductionWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
+    solve!(CRSolverWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
     
 solve(a0, a1, a2; kwargs...) =
     solve!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
