@@ -129,8 +129,8 @@ function solve!(ws::CRSolverWs, x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2:
     # Copy a0 for the final ldiv!
     x .= a0
     
-    # fill!(ws.m1, 0.0)
-    # fill!(ws.m2, 0.0)
+    fill!(ws.m1, 0.0)
+    fill!(ws.m2, 0.0)
     m1_ = ws.m1
     m2_ = ws.m2
     a1 = Matrix(a1_)
@@ -363,4 +363,18 @@ function check_convergence!(x, it, crit1, crit2, m1, tolerance, iterations)
     end
     return false
 end
-    
+
+function solve!(ws::CRSolverWs, x, d, e, nstable::Int; kwargs...)
+    n = size(d, 1)
+    a0 = sparse([-e[:, 1:nstable] zeros(n, n-nstable)])
+    a1 = Matrix([d[:, 1:nstable] -e[:, (nstable+1):n]])
+    a2 = sparse([zeros(n, nstable) d[:, (nstable+1):n]])
+    return PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2; kwargs...)
+end
+
+function solve!(ws::CRSolverWs, x, d, e; qz_criterium::Number = 1 + 1e-6, kwargs...)
+    F = schur(e, d)
+    eigenvalues = F.α ./ F.β
+    nstable = count(abs.(eigenvalues) .< qz_criterium)
+    return solve!(ws, x, d, e, nstable; kwargs...)
+end

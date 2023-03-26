@@ -7,7 +7,7 @@ Workspace for solving with the GeneralizedSchur solver.
 Can be constructed using a matrix and the number of stable solutions, i.e.
 `GSSolverWs(A, n)` with `A` an example `Matrix` and `n` the number of solutions. 
 """ 
-struct GSSolverWs{T<:AbstractFloat}
+mutable struct GSSolverWs{T<:AbstractFloat}
     tmp1::Matrix{T}
     tmp2::Matrix{T}
     g1::Matrix{T}
@@ -47,19 +47,24 @@ function solve!(ws::GSSolverWs{T}, d::Matrix{T}, e::Matrix{T}, args...) where {T
     copy!(e, ws.e)
 end
 
-function solve!(ws::GSSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T}, args...) where {T<:AbstractFloat}
+function solve!(ws::GSSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T}, nstable::Int, args...) where {T<:AbstractFloat}
     n = size(a1,2)
+    # nstable = size(ws.tmp1, 1)
     @views begin
-        ws.d[1:n, 1:n] .= a1
-        ws.d[1:n, n+1:2n] .= a2
-        ws.e[1:n, 1:n] .= .- a0
-        ws.e[1:n, 1+n:2n] .= .- a1
+        ws.d = [a1 a2; diagm(0 => ones(n)) zeros(n, n)]
+        ws.e = [-a0 -a1; zeros(n,n) diagm(0 => ones(n))]
+        ws.tmp1 = similar(ws.tmp1, nstable, nstable)
+        ws.tmp1 = similar(ws.tmp2, nstable, nstable)
+        # ws.luws1 = LUWs(nstable)
+        ws.g1 = similar(ws.g1, nstable, nstable)
+        ws.g2 = similar(ws.g2, n-nstable, nstable)
+        solve!(ws, nstable)
     end
-    for i = 1+n:2n
-        ws.d[i, i-n] = 1.0
-        ws.e[i, i] = 1.0
-    end
-    solve!(ws, args...)
+    # for i = 1+n:2n
+    #     ws.d[i, i-n] = 1.0
+    #     ws.e[i, i] = 1.0
+    # end
+    # solve!(ws, args...)
 end
 
 function solve!(ws::GSSolverWs, n1::Int64, qz_criterium::Number = 1 + 1e-6) 
