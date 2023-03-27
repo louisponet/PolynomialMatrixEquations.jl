@@ -7,24 +7,26 @@ Workspace used for solving with the cyclic reduction algorithm.
 Can be constructed as `CRSolverWs(n)` with `n` the leading dimension of
 the matrics \$A_0\$, \$A_1\$ and \$A_2\$, i.e. the number of equations.
 """
-mutable struct CRSolverWs{T, WS}
+mutable struct CRSolverWs{T, WS, MT<:AbstractMatrix{T}}
     linsolve_ws::WS
     ahat1::Matrix{T}
     a1copy::Matrix{T}
+    x::MT
     m::Matrix{T}
     m1::Matrix{T}
     m2::Matrix{T}
 end
-function CRSolverWs(::Type{T}, n::Int) where {T<:AbstractFloat}
+
+function CRSolverWs(a0::AbstractMatrix{T}) where {T<:AbstractFloat}
+    n = size(a0,1)
     linsolve_ws = LUWs(n)
     ahat1 = Matrix{T}(undef, n,n)
     a1copy = Matrix{T}(undef, n,n)
     m = Matrix{T}(undef, 2*n,2*n)
     m1 = Matrix{T}(undef, n, 2*n)
     m2 = Matrix{T}(undef, 2*n, n)
-    CRSolverWs(linsolve_ws, ahat1, a1copy, m, m1, m2) 
+    CRSolverWs(linsolve_ws, ahat1, a1copy, similar(a0), m, m1, m2)
 end
-CRSolverWs(n::Int) = CRSolverWs(Float64, n)
 
 """
     solve!([ws::CRSolverWs, ],
@@ -69,10 +71,12 @@ julia> PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2, tolerance = 1e-8, ite
  -0.0  -0.0  -0.0
 ```
 """
-function solve!(ws::CRSolverWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
+function solve!(ws::CRSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
                 tolerance::Number = 1e-8, iterations::Int=100) where {T<:AbstractFloat}
     n = size(a0, 1)
-    x .= a0
+    
+    x = ws.x
+    copy!(x, a0)
     m  = ws.m
     m1 = ws.m1
     m2 = ws.m2
@@ -121,13 +125,14 @@ function solve!(ws::CRSolverWs{T}, x::Matrix{T}, a0::Matrix{T}, a1::Matrix{T}, a
     return x
 end
 
-function solve!(ws::CRSolverWs, x, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
+function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
                            tolerance::Number = 1e-8, iterations::Int=100)
     n = size(a0,1)
     l1 = length(a1_)
 
     # Copy a0 for the final ldiv!
-    x .= a0
+    x = ws.x
+    copy!(ws.x, a0)
     
     fill!(ws.m1, 0.0)
     fill!(ws.m2, 0.0)
@@ -362,19 +367,4 @@ function check_convergence!(x, it, crit1, crit2, m1, tolerance, iterations)
         return true
     end
     return false
-end
-
-function solve!(ws::CRSolverWs, x, d, e, nstable::Int; kwargs...)
-    n = size(d, 1)
-    a0 = sparse([-e[:, 1:nstable] zeros(n, n-nstable)])
-    a1 = Matrix([d[:, 1:nstable] -e[:, (nstable+1):n]])
-    a2 = sparse([zeros(n, nstable) d[:, (nstable+1):n]])
-    return PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2; kwargs...)
-end
-
-function solve!(ws::CRSolverWs, x, d, e; qz_criterium::Number = 1 + 1e-6, kwargs...)
-    F = schur(e, d)
-    eigenvalues = F.α ./ F.β
-    nstable = count(abs.(eigenvalues) .< qz_criterium)
-    return solve!(ws, x, d, e, nstable; kwargs...)
 end
