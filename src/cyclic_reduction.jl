@@ -334,7 +334,7 @@ function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Sp
     return x
 end
 
-solve!(x::AbstractMatrix{T}, a0, a1, a2; kwargs...) where {T} =
+solve!(x::AbstractMatrix{T}, a0::SparseMatrixCSC, a1, a2::SparseMatrixCSC; kwargs...) where {T} =
     solve!(CRSolverWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
     
 solve(a0, a1, a2; kwargs...) =
