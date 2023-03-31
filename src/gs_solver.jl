@@ -21,11 +21,10 @@ end
 """
     GSSolverWs
 
-Workspace for solving with the GeneralizedSchur solver.
-Can be constructed using a matrix and the number of stable solutions, i.e.
-`GSSolverWs(A, n)` with `A` an example `Matrix` and `n` the number of solutions. 
+Workspace for solving with the Generalized Schur solver.
+`GSSolverWs(A)` with `A` an example `Matrix`. 
 """ 
-mutable struct GSSolverWs{T<:AbstractFloat}
+mutable struct GSSolverWs{T<:AbstractFloat} <: Workspace
     tmp1::Matrix{T}
     tmp2::Matrix{T}
     g1::Matrix{T}
@@ -61,21 +60,14 @@ end
 
 n_stable(ws::GSSolverWs) = size(ws.g1, 1)
 
-"""
-    solve!([ws::GSSolverWs,] d::Matrix, e::Matrix, n1::Int64, qz_criterium)
-
-The solution is returned in `ws.g1` and `ws.g2`.
-`d` and `e` are mutated during the solving.
-`n1` determines how many stable solutions should be found.
-"""
-function solve!(ws::GSSolverWs{T}, d::Matrix{T}, e::Matrix{T}, args...) where {T<:AbstractFloat}
+function solve!(ws::GSSolverWs{T}, d::Matrix{T}, e::Matrix{T}; kwargs...) where {T<:AbstractFloat}
     copy!(ws.d, d)
     copy!(ws.e, e)
-    solve!(ws, args...)
+    solve!(ws; kwargs...)
     return ws.x
 end
 
-function solve!(ws::GSSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T}, args...) where {T<:AbstractFloat}
+function solve!(ws::GSSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T}; kwargs...) where {T<:AbstractFloat}
     n = size(a1,2)
     nstable = n_stable(ws)
     @views begin
@@ -84,10 +76,11 @@ function solve!(ws::GSSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T}, 
         ws.d[:, 1:nstable]   .=    a1[:, 1:nstable]
         ws.d[:, nstable+1:n] .=    a2[:, nstable+1:n]
     end
-    solve!(ws, args...)
+    solve!(ws; kwargs...)
 end
 
-function solve!(ws::GSSolverWs, qz_criterium::Number = 1 + 1e-6)
+function solve!(ws::GSSolverWs; tolerance::Number = 1e-8)
+    qz_criterium = 1 + tolerance
     fill!(ws.x, 0.0)
     gges!(ws.schurws, 'N', 'V', ws.e, ws.d; select = (αr, αi, β) -> αr^2 + αi^2 < qz_criterium * β^2)
     
@@ -122,9 +115,3 @@ function solve!(ws::GSSolverWs, qz_criterium::Number = 1 + 1e-6)
     end
     return ws.x
 end
-
-solve!(d::Matrix, e::Matrix, n1::Int, args...) =
-    solve!(GSSolverWs(d, n1), d, e, n1, args...)
-
-solve(d::Matrix, e::Matrix, n1::Int, args...) =
-    solve!(similar(d), similar(e), n1, args...)

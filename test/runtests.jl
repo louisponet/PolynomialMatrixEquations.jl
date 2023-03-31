@@ -1,6 +1,6 @@
 using LinearAlgebra
 using PolynomialMatrixEquations
-using PolynomialMatrixEquations: solve!, solve
+using PolynomialMatrixEquations: solve!, solve, Workspace, CRSolverWs, GSSolverWs
 using PolynomialMatrixEquations.SparseArrays: sparse
 const PME = PolynomialMatrixEquations
 using Random
@@ -11,7 +11,7 @@ unstablecas = false
 numberundeterminate = 0
 numberunstable = 0
 
-qz_criterium = 1 + 1e-6
+tolerance = 1e-6
 @testset "all" begin
     Random.seed!(123)
     ncases = 20
@@ -39,26 +39,27 @@ qz_criterium = 1 + 1e-6
                 @testset "d, e" begin
                     d = copy(d_orig)
                     e = copy(e_orig)
-                    ws1 = GSSolverWs(a0_orig)
-                    gs_result = deepcopy(solve!(ws1, d, e, qz_criterium))
+                    
+                    ws1 = Workspace(d, e, nstable)
+                    gs_result = deepcopy(solve!(ws1, d, e; tolerance = tolerance))
                     @test d_orig*[I(nstable); ws1.g2]*ws1.g1 ≈ e_orig*[I(nstable); ws1.g2]
                     
                     nstable1 = nstable + 1
                     a0 = Matrix([-e_orig[:, 1:nstable1] zeros(n, n-nstable1)])
                     ws1 = GSSolverWs(a0)
-                    @test_throws PME.UnstableSystemException solve!(ws1, d, e, qz_criterium)
+                    @test_throws PME.UnstableSystemException solve!(ws1, d, e; tolerance=tolerance)
                     
                     nstable1 = nstable - 1
                     a0 = Matrix([-e_orig[:, 1:nstable1] zeros(n, n-nstable1)])
                     ws1 = GSSolverWs(a0)
-                    @test_throws PME.UndeterminateSystemException solve!(ws1, d, e, qz_criterium)
+                    @test_throws PME.UndeterminateSystemException solve!(ws1, d, e; tolerance=tolerance)
                 end
                 @testset "a0, a1, a2" begin
                     a0 = copy(a0_orig)
                     a1 = copy(a1_orig)
                     a2 = copy(a2_orig)
                     ws1 = GSSolverWs(a0)
-                    x = solve!(ws1, a0, a1, a2, qz_criterium)
+                    x = solve!(ws1, a0, a1, a2; tolerance=tolerance)
 
                     @test isapprox(a1 * x + a2 * x * x + a0, zeros(n, n), atol= 1e-8)
                     
@@ -71,7 +72,7 @@ qz_criterium = 1 + 1e-6
                     a1 = copy(a1_orig)
                     a2 = copy(a2_orig)
                     ws2 = CRSolverWs(a0)
-                    x = deepcopy(solve!(ws2, a0, a1, a2, tolerance = 1e-20, iterations = 500))
+                    x = deepcopy(solve!(ws2, a0, a1, a2, tolerance = 1e-20, max_iterations = 500))
                     @test isapprox(a0_orig + a1_orig*x + a2_orig*x*x, zeros(n, n); atol = 1e-8)
                     @test isapprox(x, gs_result; atol=1e-8)
 
@@ -82,7 +83,7 @@ qz_criterium = 1 + 1e-6
                     a2 = Matrix([zeros(n, nstable1) d_orig[:, (nstable1+1):n]])
 
                     ws2 = CRSolverWs(a0)
-                    @test_throws PME.UnstableSystemException solve!(ws2, a0, a1, a2, tolerance=1e-8, iterations=500)
+                    @test_throws PME.UnstableSystemException solve!(ws2, a0, a1, a2, tolerance=1e-8, max_iterations=500)
 
                     nstable1 = nstable - 1
                     a0 = Matrix([-e_orig[:, 1:nstable1] zeros(n, n-nstable1)])
@@ -90,15 +91,15 @@ qz_criterium = 1 + 1e-6
                     a2 = Matrix([zeros(n, nstable1) d_orig[:, (nstable1+1):n]])
 
                     ws2 = CRSolverWs(a0)
-                    @test_throws PME.UndeterminateSystemException solve!(ws2, a0, a1, a2, tolerance=1e-8, iterations=500)
+                    @test_throws PME.UndeterminateSystemException solve!(ws2, a0, a1, a2, tolerance=1e-8, max_iterations=500)
                 end
                 @testset "sparse" begin
                     a0 = sparse(a0_orig)
                     a1 = sparse(a1_orig)
                     a2 = sparse(a2_orig)
 
-                    ws2 = CRSolverWs(a0)
-                    x = solve!(ws2, a0, a1, a2, tolerance = 1e-20, iterations = 500)
+                    ws2 = Workspace(a0, a1, a2)
+                    x = solve!(ws2, a0, a1, a2, tolerance = 1e-20, max_iterations = 500)
                     @test isapprox(a0 + a1*x + a2*x*x, zeros(n, n); atol = 1e-8)
 
                     nstable1 = nstable + 1
@@ -109,7 +110,7 @@ qz_criterium = 1 + 1e-6
 
                     ws2 = CRSolverWs(a0)
 
-                    @test_throws PME.UnstableSystemException solve!(ws2, a0, a1, a2, tolerance=1e-12, iterations=500)
+                    @test_throws PME.UnstableSystemException solve!(ws2, a0, a1, a2, tolerance=1e-12, max_iterations=500)
 
                     nstable1 = nstable - 1
 
@@ -118,7 +119,7 @@ qz_criterium = 1 + 1e-6
                     a2 = sparse([zeros(n, nstable1) d_orig[:, (nstable1+1):n]])
 
                     ws2 = CRSolverWs(a0)
-                    @test_throws PME.UndeterminateSystemException solve!(ws2,  a0, a1, a2, tolerance=1e-12, iterations=500)
+                    @test_throws PME.UndeterminateSystemException solve!(ws2,  a0, a1, a2, tolerance=1e-12, max_iterations=500)
                 end
             end
         end

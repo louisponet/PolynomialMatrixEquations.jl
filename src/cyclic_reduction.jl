@@ -3,11 +3,9 @@ using LinearAlgebra.BLAS: gemm!
 """
     CRSolverWs
 
-Workspace used for solving with the cyclic reduction algorithm.
-Can be constructed as `CRSolverWs(n)` with `n` the leading dimension of
-the matrics \$A_0\$, \$A_1\$ and \$A_2\$, i.e. the number of equations.
+Workspace used for solving with the cyclic reduction algorithm of [Bini et al.](https://link.springer.com/article/10.1007/s11075-008-9253-0).
 """
-mutable struct CRSolverWs{T, WS, MT<:AbstractMatrix{T}}
+mutable struct CRSolverWs{T, WS, MT<:AbstractMatrix{T}} <: Workspace
     linsolve_ws::WS
     ahat1::Matrix{T}
     a1copy::Matrix{T}
@@ -28,51 +26,8 @@ function CRSolverWs(a0::AbstractMatrix{T}) where {T<:AbstractFloat}
     CRSolverWs(linsolve_ws, ahat1, a1copy, similar(a0), m, m1, m2)
 end
 
-"""
-    solve!([ws::CRSolverWs, ],
-           x::AbstractMatrix,
-           a0::AbstractMatrix,
-           a1::AbstractMatrix,
-           a2::AbstractMatrix;
-           tolerance=1e-8,
-           iterations=100)
-
-Solves the quadratic matrix equation `a0 + a1*x + a2*x*x = 0`, using the cyclic reduction method from Bini et al. (???).
-If `a0` and `a2` are `SparseMatrixCSC`, a variation will be used that optimally packs the equations. `a1` will always be used (i.e. potentially converted) as standard `Matrix`.
-
-The solution is returned in `x`. In case of nonconvergency, `x` is set to `NaN` and 
-`UndeterminateSystemExcpetion` or `UnstableSystemException` is thrown.
-
-During the solving, `x`, `a1` and `ws` are mutated.
-Use `solve(a0, a1, a2)` for a non-mutating version.
-
-# Example
-```jldoctest
-julia> using PolynomialMatrixEquations
-
-julia> using LinearAlgebra
-
-julia> n = 3;
-
-julia> ws = CRSolverWs(n);
-
-julia> a0 = [0.5 0 0; 0 0.5 0; 0 0 0];
-
-julia> a1 = Matrix(1.0I, n, n);
-
-julia> a2 = [0 0 0; 0 0 0; 0 0 0.8];
-
-julia> x = zeros(n,n);
-
-julia> PolynomialMatrixEquations.solve!(ws, x, a0, a1, a2, tolerance = 1e-8, iterations = 50)
-3×3 Matrix{Float64}:
- -0.5  -0.0  -0.0
- -0.0  -0.5  -0.0
- -0.0  -0.0  -0.0
-```
-"""
 function solve!(ws::CRSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
-                tolerance::Number = 1e-8, iterations::Int=100) where {T<:AbstractFloat}
+                tolerance::Number = 1e-8, max_iterations::Int=100) where {T<:AbstractFloat}
     n = size(a0, 1)
     
     x = ws.x
@@ -90,7 +45,7 @@ function solve!(ws::CRSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
     end
     it = 0
     
-    @inbounds while it < iterations
+    @inbounds while it < max_iterations
         # ws.m = [a0; a2]*(a1\[a0 a2])
         ws.a1copy .= a1
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
@@ -116,7 +71,7 @@ function solve!(ws::CRSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
                 a1[j, i] += t5
             end
         end
-        check_convergence!(x, it, crit, crit2, view(m1, 1:n, 1:n), tolerance, iterations) && break
+        check_convergence!(x, it, crit, crit2, view(m1, 1:n, 1:n), tolerance, max_iterations) && break
         it += 1
     end
     lu_t = LU(factorize!(ws.linsolve_ws, ws.ahat1)...)
@@ -126,7 +81,7 @@ function solve!(ws::CRSolverWs{T}, a0::Matrix{T}, a1::Matrix{T}, a2::Matrix{T};
 end
 
 function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::SparseMatrixCSC;
-                           tolerance::Number = 1e-8, iterations::Int=100)
+                           tolerance::Number = 1e-8, max_iterations::Int=100)
     n = size(a0,1)
     l1 = length(a1_)
 
@@ -261,7 +216,7 @@ function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Sp
     m22_zero_rows = filter(x -> x > n, m2_zero_rows) .- n 
 
     it = 0
-    @inbounds while it <= iterations
+    @inbounds while it <= max_iterations
         # Solve m = [a0; a2]*(a1\[a0 a2])
         unsafe_copyto!(ws.a1copy, 1, a1, 1, l1)
         lu_t = LU(factorize!(ws.linsolve_ws, ws.a1copy)...)
@@ -324,7 +279,7 @@ function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Sp
             end
             m1[m22_zero_rows, i] .= 0.0
         end
-        check_convergence!(x, it, crit, crit2, m1, tolerance, iterations) && break
+        check_convergence!(x, it, crit, crit2, m1, tolerance, max_iterations) && break
         it += 1
     end
     
@@ -334,13 +289,7 @@ function solve!(ws::CRSolverWs, a0::SparseMatrixCSC, a1_::AbstractMatrix, a2::Sp
     return x
 end
 
-solve!(x::AbstractMatrix{T}, a0::SparseMatrixCSC, a1, a2::SparseMatrixCSC; kwargs...) where {T} =
-    solve!(CRSolverWs(T, size(a1, 1)), x, a0, a1, a2; kwargs...)
-    
-solve(a0, a1, a2; kwargs...) =
-    solve!(similar(Matrix(a1)), a0, copy(a1), a2;  kwargs...)
-
-function check_convergence!(x, it, crit1, crit2, m1, tolerance, iterations)
+function check_convergence!(x, it, crit1, crit2, m1, tolerance, max_iterations)
     if isnan(crit1 + crit2) 
         fill!(x, NaN)
         if m1[1] < Inf
@@ -356,7 +305,7 @@ function check_convergence!(x, it, crit1, crit2, m1, tolerance, iterations)
             return true
         end
     end
-    if it == iterations
+    if it == max_iterations
         @error "Max iterations reached without converging"
         fill!(x, NaN)
         if norm(m1) < tolerance
